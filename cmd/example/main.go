@@ -5,20 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/dukebward/go_do_work/internal/queue"
 )
 
 func main() {
 	// Create the queue with, say, 5 workers, a buffer of 100 tasks
 	// and default retry policy.
-	queue := NewTaskQueue(
-		WithWorkerCount(5),
-		WithQueueSize(100),
-		WithMaxRetries(3),
-		WithExponentialBackoff(time.Second, 5*time.Minute),
+	taskQueue := queue.NewTaskQueue(
+		queue.WithWorkerCount(5),
+		queue.WithQueueSize(100),
+		queue.WithRetryPolicy(3, time.Second),
 	)
 
 	// Submit a simple task
-	taskID, _ := queue.Submit(func(ctx context.Context) error {
+	taskID, _ := taskQueue.Submit(context.Background(), func(ctx context.Context) error {
 		// Some work here, e.g. sending an email
 		fmt.Println("Sending an email...")
 		// Simulate error
@@ -27,19 +28,19 @@ func main() {
 
 	// We could check status later
 	time.Sleep(2 * time.Second)
-	info, _ := queue.GetInfo(taskID)
+	info, _ := taskQueue.Status(taskID)
 	fmt.Printf("Task status: %s, attempts so far: %d\n", info.Status, info.Attempts)
 
 	// Schedule a task in the future
-	_, _ = queue.Schedule(func(ctx context.Context) error {
+	_, _ = taskQueue.Schedule(context.Background(), func(ctx context.Context) error {
 		fmt.Println("This runs 10 seconds later.")
 		return nil
-	}, time.Now().Add(10*time.Second))
+	}, 10*time.Second)
 
 	// Let the program run for a bit
 	time.Sleep(12 * time.Second)
 
 	// Now gracefully shutdown
-	_ = queue.Shutdown(context.Background())
+	_ = taskQueue.Shutdown(context.Background())
 	fmt.Println("Exited cleanly.")
 }
