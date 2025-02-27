@@ -30,11 +30,6 @@ type TaskInfo struct {
 	LastError error
 }
 
-type RetryPolicy struct {
-	maxRetries int
-	backoff    time.Duration
-}
-
 type TaskFunc func(ctx context.Context) error
 
 type Options struct {
@@ -75,11 +70,14 @@ func WithBufferSize(size int) Option {
 }
 
 // WithRetryPolicy sets the retry policy
-func WithRetryPolicy(maxRetries int, backoff time.Duration) Option {
+func WithRetryPolicy(maxRetries int, baseDelay time.Duration, maxDelay time.Duration, strategy RetryStrategy, shouldRetry func(error) bool) Option {
 	return func(o *Options) {
 		o.retryPolicy = RetryPolicy{
-			maxRetries: maxRetries,
-			backoff:    backoff,
+			MaxRetries:  maxRetries,
+			BaseDelay:   baseDelay,
+			MaxDelay:    maxDelay,
+			Strategy:    strategy,
+			ShouldRetry: shouldRetry,
 		}
 	}
 }
@@ -91,8 +89,14 @@ func NewTaskQueue(opts ...Option) *TaskQueue {
 		queueSize:   100,
 		bufferSize:  100,
 		retryPolicy: RetryPolicy{
-			maxRetries: 3,
-			backoff:    1 * time.Second,
+			MaxRetries: 3,
+			BaseDelay:  1 * time.Second,
+			MaxDelay:   1 * time.Minute,
+			Strategy:   RetryFixed,
+			ShouldRetry: func(err error) bool {
+				// by default retry all errors
+				return err != nil
+			},
 		},
 	}
 

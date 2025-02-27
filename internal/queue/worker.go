@@ -68,45 +68,42 @@ func (q *TaskQueue) processTask(task Task) {
 	q.handleFailedTask(ctx, task, taskFunc, err, 1)
 }
 
-// retry logic for failed tasks
+// handleFailedTask implements retry logic for tasks that fail
 func (q *TaskQueue) handleFailedTask(ctx context.Context, task Task, taskFunc TaskFunc, err error, attempt int) {
-	// get the task info and retry policy object
-	maxRetries := q.opts.retryPolicy.maxRetries
-	backoff := q.opts.retryPolicy.backoff
-
-	// check if we should retry
-	if attempt <= maxRetries {
-		// update status
+	// Check if we should retry this error based on policy and attempts
+	if ShouldRetryError(q.opts.retryPolicy, err, attempt) {
+		// Update status to retrying
 		q.updateTaskStatus(task.ID, "retrying", attempt, err)
 
-		// calculate the backoff duration (maybe do exponential)
-		retryDelay := backoff * time.Duration(attempt)
+		// Calculate delay based on the retry strategy and attempt number
+		retryDelay := CalculateRetryDelay(q.opts.retryPolicy, attempt)
 
-		// schedule the retry
+		// Schedule retry after delay
 		go func() {
 			select {
 			case <-time.After(retryDelay):
-				// try again
+				// Try again
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
 
-				// if no error, all good
 				newErr := taskFunc(ctx)
 				if newErr == nil {
+					// Task completed successfully
 					q.updateTaskStatus(task.ID, "completed", attempt+1, nil)
 					return
 				}
 
-				//recurse and handle the failure with increment attempt
-				q.handleFailedTask(ctx, task, taskFunc, newErr, attempt+1)
+				// Recursively handle the failure with incremented attempt counter
+				q.handleFailedTask(context.Background(), task, taskFunc, newErr, attempt+1)
+
 			case <-q.done:
-				// queue is done
+				// Queue is shutting down
 				q.updateTaskStatus(task.ID, "canceled", attempt, err)
 				return
 			}
 		}()
 	} else {
-		// exhausted all retries
+		// We've exhausted all retries
 		q.updateTaskStatus(task.ID, "failed", attempt, err)
 	}
 }
