@@ -42,7 +42,7 @@ func (q *TaskQueue) processTask(task Task) {
 	taskFunc, ok := task.Payload.(TaskFunc)
 	if !ok {
 		// log errors
-		q.updateTaskStatus(task.ID, "failed", nil, fmt.Errorf("invalid task type"))
+		q.updateTaskStatus(task.ID, "failed", 1, fmt.Errorf("invalid task type"))
 		return
 	}
 
