@@ -106,12 +106,61 @@ err := taskQueue.Shutdown(ctx)
 
 ## 🔧 Configuration Options
 
-| Option | Description |
-|--------|-------------|
-| `WithWorkerCount(n)` | Set number of concurrent workers |
-| `WithQueueSize(n)` | Set maximum queue capacity |
-| `WithRetryPolicy(...)` | Configure retry behavior |
-| `WithBufferSize(n)` | Set channel buffer size |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `WithWorkerCount(n)` | Set number of concurrent workers | 1 |
+| `WithQueueSize(n)` | Set maximum queue capacity | 100 |
+| `WithBufferSize(n)` | Set channel buffer size | 100 |
+| `WithRetryPolicy(maxRetries, baseDelay, maxDelay, strategy, shouldRetry)` | Configure retry behavior | See below |
+
+### Retry Policy Configuration
+
+The retry policy can be customized using the `WithRetryPolicy` option with the following parameters:
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `maxRetries` | Maximum number of retry attempts | 3 |
+| `baseDelay` | Initial delay between retries | 1 second |
+| `maxDelay` | Maximum delay between retries | 1 minute |
+| `strategy` | Retry backoff strategy | `RetryFixed` |
+| `shouldRetry` | Function that determines if an error should be retried | All errors are retried |
+
+#### Available Retry Strategies
+
+| Strategy | Description |
+|----------|-------------|
+| `RetryFixed` | Uses a fixed delay between retry attempts |
+| `RetryExponential` | Increases delay exponentially between retry attempts |
+| `RetryLinear` | Increases delay linearly between retry attempts |
+
+#### Example Configuration
+
+```go
+// Create a task queue with custom configuration
+taskQueue := queue.NewTaskQueue(
+    // Set 5 concurrent workers
+    queue.WithWorkerCount(5),
+    
+    // Set queue capacity to 200 tasks
+    queue.WithQueueSize(200),
+    
+    // Set channel buffer to 150
+    queue.WithBufferSize(150),
+    
+    // Configure retry policy with exponential backoff
+    queue.WithRetryPolicy(
+        5,                      // 5 max retries
+        500*time.Millisecond,   // 500ms base delay
+        30*time.Second,         // 30s max delay
+        queue.RetryExponential, // Exponential backoff
+        func(err error) bool {  // Custom retry condition
+            // Only retry specific errors
+            return errors.Is(err, io.ErrUnexpectedEOF) || 
+                   errors.Is(err, context.DeadlineExceeded)
+        },
+    ),
+)
+```
 
 ## 📖 API Reference
 
