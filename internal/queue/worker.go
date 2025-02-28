@@ -18,6 +18,7 @@ func (q *TaskQueue) worker(id int) {
 		case <-q.done:
 			// queue has received done
 			return
+		// will block until a task is available
 		case task, ok := <-q.tasks:
 			if !ok {
 				// channel was closed or no tasks
