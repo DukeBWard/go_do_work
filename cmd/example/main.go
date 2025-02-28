@@ -14,11 +14,11 @@ import (
 )
 
 func main() {
-	// Create a context that can be canceled on program termination
+	// create a context that can be canceled on program termination
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Set up signal handling for graceful shutdown
+	// set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -27,7 +27,7 @@ func main() {
 		cancel()
 	}()
 
-	// Create the queue with 5 workers, a buffer of 100 tasks
+	// create the queue with 5 workers, a buffer of 100 tasks
 	// and a simple retry policy
 	taskQueue := queue.NewTaskQueue(
 		queue.WithWorkerCount(5),
@@ -36,11 +36,11 @@ func main() {
 	)
 	fmt.Println("Task queue started with 5 workers")
 
-	// Submit a simple task that will fail
+	// submit a simple task that will fail
 	taskID, err := taskQueue.Submit(ctx, func(ctx context.Context) error {
-		// Some work here, e.g. sending an email
+		// some work here, e.g. sending an email
 		fmt.Println("Sending an email...")
-		// Simulate error
+		// simulate error
 		return errors.New("failed to send email: connection timeout")
 	})
 	if err != nil {
@@ -48,7 +48,7 @@ func main() {
 	}
 	fmt.Printf("Submitted task with ID: %s\n", taskID)
 
-	// Check status after a short delay
+	// check status after a short delay
 	time.Sleep(2 * time.Second)
 	info, err := taskQueue.Status(taskID)
 	if err != nil {
@@ -60,31 +60,54 @@ func main() {
 		}
 	}
 
-	// Schedule a task to run in the future
+	// schedule a task to run after a delay
 	scheduledID, err := taskQueue.Schedule(ctx, func(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			fmt.Println("Running scheduled task...")
+			fmt.Println("Running delayed task...")
 			return nil
 		}
 	}, 5*time.Second)
 	if err != nil {
 		log.Printf("Failed to schedule task: %v", err)
 	} else {
-		fmt.Printf("Scheduled task with ID: %s\n", scheduledID)
+		fmt.Printf("Scheduled delayed task with ID: %s\n", scheduledID)
 	}
 
-	// Let the program run for a bit to allow tasks to complete
+	// schedule a task to run at a specific time (5 seconds from now)
+	executeAt := time.Now().Add(5 * time.Second)
+	scheduledAtID, err := taskQueue.ScheduleAt(ctx, func(ctx context.Context) error {
+		fmt.Println("Running task scheduled for specific time:", executeAt.Format(time.RFC3339))
+		return nil
+	}, executeAt)
+	if err != nil {
+		log.Printf("Failed to schedule task at specific time: %v", err)
+	} else {
+		fmt.Printf("Scheduled task at %s with ID: %s\n", executeAt.Format(time.RFC3339), scheduledAtID)
+	}
+
+	// schedule a recurring task
+	recurringID, err := taskQueue.ScheduleRecurring(ctx, func(ctx context.Context) error {
+		fmt.Println("Running recurring task at:", time.Now().Format(time.RFC3339))
+		return nil
+	}, 2*time.Second)
+	if err != nil {
+		log.Printf("Failed to schedule recurring task: %v", err)
+	} else {
+		fmt.Printf("Scheduled recurring task with ID: %s\n", recurringID)
+	}
+
+	// let the program run for a bit to allow tasks to complete
 	select {
 	case <-ctx.Done():
 		fmt.Println("Context canceled, shutting down...")
-	case <-time.After(10 * time.Second):
+	case <-time.After(15 * time.Second):
 		fmt.Println("Timeout reached, shutting down...")
 	}
 
-	// Gracefully shutdown with a timeout
+	// gracefully shutdown with a timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	
