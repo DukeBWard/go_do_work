@@ -45,7 +45,7 @@ func DefaultRetryPolicy() RetryPolicy {
 	}
 }
 
-// WithMaxRetries creates an Option that sets the maximum retry attempts
+// withmaxretries creates an option that sets the maximum retry attempts
 func WithMaxRetries(maxRetries int) Option {
 	return func(o *Options) {
 		if maxRetries >= 0 {
@@ -54,7 +54,7 @@ func WithMaxRetries(maxRetries int) Option {
 	}
 }
 
-// WithBaseDelay creates an Option that sets the base delay for retries
+// withbasedelay creates an option that sets the base delay for retries
 func WithBaseDelay(delay time.Duration) Option {
 	return func(o *Options) {
 		if delay > 0 {
@@ -63,7 +63,7 @@ func WithBaseDelay(delay time.Duration) Option {
 	}
 }
 
-// WithMaxDelay creates an Option that sets the maximum delay for retries
+// withmaxdelay creates an option that sets the maximum delay for retries
 func WithMaxDelay(delay time.Duration) Option {
 	return func(o *Options) {
 		if delay > 0 {
@@ -72,14 +72,14 @@ func WithMaxDelay(delay time.Duration) Option {
 	}
 }
 
-// WithRetryStrategy creates an Option that sets the retry strategy
+// withretrystrategy creates an option that sets the retry strategy
 func WithRetryStrategy(strategy RetryStrategy) Option {
 	return func(o *Options) {
 		o.retryPolicy.Strategy = strategy
 	}
 }
 
-// WithCustomRetryCheck creates an Option that sets a custom function to determine
+// withcustomretrycheck creates an option that sets a custom function to determine
 // if a specific error should trigger a retry
 func WithCustomRetryCheck(shouldRetry func(error) bool) Option {
 	return func(o *Options) {
@@ -103,10 +103,10 @@ func CalculateRetryDelay(policy RetryPolicy, attempt int) time.Duration {
 		return policy.BaseDelay
 
 	case RetryExponential:
-		// Calculate delay with exponential backoff: baseDelay * 2^attempt
+		// calculate delay with exponential backoff: baseDelay * 2^attempt
 		delay := float64(policy.BaseDelay) * math.Pow(2, float64(attempt-1))
 
-		// Cap at max delay
+		// cap at max delay
 		if delay > float64(policy.MaxDelay) {
 			delay = float64(policy.MaxDelay)
 		}
@@ -114,59 +114,59 @@ func CalculateRetryDelay(policy RetryPolicy, attempt int) time.Duration {
 		return time.Duration(delay)
 
 	case RetryExponentialJitter:
-		// Calculate delay with exponential backoff
+		// calculate delay with exponential backoff
 		delay := float64(policy.BaseDelay) * math.Pow(2, float64(attempt-1))
 
-		// Cap at max delay
+		// cap at max delay
 		if delay > float64(policy.MaxDelay) {
 			delay = float64(policy.MaxDelay)
 		}
 
-		// Add jitter: random value between 0.5*delay and 1.5*delay
+		// add jitter: random value between 0.5*delay and 1.5*delay
 		jitterFactor := 0.5 + rand.Float64()
 		delay = delay * jitterFactor
 
 		return time.Duration(delay)
 
 	default:
-		// Default to fixed delay if strategy is unknown
+		// default to fixed delay if strategy is unknown
 		return policy.BaseDelay
 	}
 }
 
-// ShouldRetryError determines if the given error should be retried based on the policy
+// shouldretryerror determines if the given error should be retried based on the policy
 func ShouldRetryError(policy RetryPolicy, err error, attempts int) bool {
-	// Check if maximum retry attempts have been exceeded
+	// check if maximum retry attempts have been exceeded
 	if attempts > policy.MaxRetries {
 		return false
 	}
 
-	// Use the policy's custom retry checker if provided
+	// use the policy's custom retry checker if provided
 	if policy.ShouldRetry != nil {
 		return policy.ShouldRetry(err)
 	}
 
-	// Default behavior: retry if there's an error
+	// default behavior: retry if there's an error
 	return err != nil
 }
 
-// IsRetryableError is a utility function that determines if a specific error
-// is considered retryable (can be used with WithCustomRetryCheck)
+// isretryableerror is a utility function that determines if a specific error
+// is considered retryable (can be used with withcustomretrycheck)
 func IsRetryableError(err error) bool {
-	// This is a placeholder. In a real implementation, you would:
-	// 1. Check for specific error types that should be retried
-	// 2. Check for specific error types that should NOT be retried
+	// this is a placeholder. in a real implementation, you would:
+	// 1. check for specific error types that should be retried
+	// 2. check for specific error types that should NOT be retried
 
-	// Example implementation:
+	// example implementation:
 	if err == nil {
 		return false
 	}
 
-	// Example: don't retry permanent errors (you'd define this somewhere)
+	// example: don't retry permanent errors (you'd define this somewhere)
 	// if errors.Is(err, ErrPermanent) {
 	//     return false
 	// }
 
-	// By default, consider all other errors as retryable
+	// by default, consider all other errors as retryable
 	return true
 }

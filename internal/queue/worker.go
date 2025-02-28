@@ -11,6 +11,8 @@ import (
 func (q *TaskQueue) worker(id int) {
 	defer q.wg.Done()
 
+	// loop until the queue is closed
+	// will loop the select statement until the queue is closed
 	for {
 		select {
 		case <-q.done:
@@ -68,47 +70,47 @@ func (q *TaskQueue) processTask(task Task) {
 	q.handleFailedTask(ctx, task, taskFunc, err, 1)
 }
 
-// handleFailedTask implements retry logic for tasks that fail
+// handlefailedtask implements retry logic for tasks that fail
 func (q *TaskQueue) handleFailedTask(ctx context.Context, task Task, taskFunc TaskFunc, err error, attempt int) {
-	// Check if we should retry this error based on policy and attempts
+	// check if we should retry this error based on policy and attempts
 	if ShouldRetryError(q.opts.retryPolicy, err, attempt) {
-		// Update status to retrying
+		// update status to retrying
 		q.updateTaskStatus(task.ID, "retrying", attempt, err)
 
-		// Calculate delay based on the retry strategy and attempt number
+		// calculate delay based on the retry strategy and attempt number
 		retryDelay := CalculateRetryDelay(q.opts.retryPolicy, attempt)
 
-		// Schedule retry after delay
+		// schedule retry after delay
 		go func() {
 			select {
 			case <-time.After(retryDelay):
-				// Try again
+				// try again
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
 
 				newErr := taskFunc(ctx)
 				if newErr == nil {
-					// Task completed successfully
+					// task completed successfully
 					q.updateTaskStatus(task.ID, "completed", attempt+1, nil)
 					return
 				}
 
-				// Recursively handle the failure with incremented attempt counter
+				// recursively handle the failure with incremented attempt counter
 				q.handleFailedTask(context.Background(), task, taskFunc, newErr, attempt+1)
 
 			case <-q.done:
-				// Queue is shutting down
+				// queue is shutting down
 				q.updateTaskStatus(task.ID, "canceled", attempt, err)
 				return
 			}
 		}()
 	} else {
-		// We've exhausted all retries
+		// we've exhausted all retries
 		q.updateTaskStatus(task.ID, "failed", attempt, err)
 	}
 }
 
-// update the status of a task i nthe task status map
+// update the status of a task in the task status map
 func (q *TaskQueue) updateTaskStatus(taskID, status string, attemts int, lastError error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()

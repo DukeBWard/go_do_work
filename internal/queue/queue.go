@@ -39,10 +39,10 @@ type Options struct {
 	retryPolicy RetryPolicy
 }
 
-// Option defines a function type for configuring TaskQueue
+// option defines a function type for configuring taskqueue
 type Option func(*Options)
 
-// WithWorkerCount sets the number of workers
+// withworkercount sets the number of workers
 func WithWorkerCount(count int) Option {
 	return func(o *Options) {
 		if count > 0 {
@@ -51,7 +51,7 @@ func WithWorkerCount(count int) Option {
 	}
 }
 
-// WithQueueSize sets the queue size
+// withqueuesize sets the queue size
 func WithQueueSize(size int) Option {
 	return func(o *Options) {
 		if size > 0 {
@@ -60,7 +60,7 @@ func WithQueueSize(size int) Option {
 	}
 }
 
-// WithBufferSize sets the buffer size
+// withbuffersize sets the buffer size
 func WithBufferSize(size int) Option {
 	return func(o *Options) {
 		if size > 0 {
@@ -69,7 +69,7 @@ func WithBufferSize(size int) Option {
 	}
 }
 
-// WithRetryPolicy sets the retry policy
+// withretrypolicy sets the retry policy
 func WithRetryPolicy(maxRetries int, baseDelay time.Duration, maxDelay time.Duration, strategy RetryStrategy, shouldRetry func(error) bool) Option {
 	return func(o *Options) {
 		o.retryPolicy = RetryPolicy{
@@ -105,7 +105,7 @@ func NewTaskQueue(opts ...Option) *TaskQueue {
 		opt(options)
 	}
 
-	return &TaskQueue{
+	queue := &TaskQueue{
 		opts:       options,
 		tasks:      make(chan Task, options.bufferSize),
 		done:       make(chan struct{}),
@@ -113,6 +113,10 @@ func NewTaskQueue(opts ...Option) *TaskQueue {
 		taskStatus: make(map[string]TaskInfo),
 	}
 
+	// automatically start workers
+	queue.startWorkers()
+
+	return queue
 }
 
 func (q *TaskQueue) Submit(ctx context.Context, task TaskFunc) (string, error) {
@@ -122,6 +126,9 @@ func (q *TaskQueue) Submit(ctx context.Context, task TaskFunc) (string, error) {
 		ID:      taskID,
 		Payload: task,
 	}
+
+	// initialize task status before submitting
+	q.initTaskStatus(taskID, "queued")
 
 	select {
 	case q.tasks <- newTask:
@@ -165,19 +172,14 @@ func (q *TaskQueue) Status(id string) (TaskInfo, error) {
 	return taskInfo, nil
 }
 
-func (q *TaskQueue) Schedule(ctx context.Context, task TaskFunc, delay time.Duration) (string, error) {
-	taskID := uuid.New().String()
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			// ctx was canceled
-			return
-		case <-time.After(delay):
-			// delay has elapsed, submit the task to the q
-			q.Submit(ctx, task)
-		}
-	}()
-
-	return taskID, nil
+// inittaskstatus initializes a task status in the status map (private method)
+func (q *TaskQueue) initTaskStatus(taskID, status string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	
+	q.taskStatus[taskID] = TaskInfo{
+		ID:       taskID,
+		Status:   status,
+		Attempts: 0,
+	}
 }
