@@ -132,6 +132,7 @@ The retry policy can be customized using the `WithRetryPolicy` option with the f
 | `RetryFixed` | Uses a fixed delay between retry attempts |
 | `RetryExponential` | Increases delay exponentially between retry attempts |
 | `RetryLinear` | Increases delay linearly between retry attempts |
+| `RetryImmediate` | Retries immediately without any delay |
 
 #### Example Configuration
 
