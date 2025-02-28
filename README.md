@@ -1,125 +1,129 @@
-# go_do_work
-In-Memory Task Queue with Concurrency Controls
+# 🚀 go_do_work
 
-# Core Features
+> A lightweight, in-memory task queue with powerful concurrency controls for Go applications.
 
-### Producer API
+[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)](https://golang.org/doc/go1.21)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A function that allows the user to enqueue a “task” (which could be a function, a closure, or a structure describing the work).
-Users might call something like queue.Submit(func(ctx context.Context) error { ... }), returning an ID or a future/promise for status.
+## 📋 Installation
 
-### Worker Pool
+```bash
+go get github.com/dukebward/go_do_work
+```
 
-A configurable number of workers (N goroutines) each reading tasks from a shared channel.
-If the queue is empty, workers idle; if full, tasks are buffered or blocked until a slot is available.
+## ✨ Features
 
-### Scheduler / Delayed Queue (Optional but valuable)
+- **🔄 Concurrent Processing** - Configurable worker pool for parallel task execution
+- **⏰ Flexible Scheduling** - Run tasks immediately, after a delay, or on a recurring schedule
+- **🔁 Smart Retries** - Automatic retries with customizable backoff strategies
+- **🔍 Task Tracking** - Monitor task status, attempts, and errors
+- **🛑 Graceful Shutdown** - Clean termination with in-flight task completion
 
-Ability to schedule a task to run in the future (e.g., “run this job in 5 minutes”), using either a min-heap or a timer-based approach behind the scenes.
-Internally, you might maintain a priority queue or a separate scheduling goroutine that wakes up tasks at the right time.
-
-### Retry Logic
-
-On failure, you can re-queue the task with a backoff (exponential or fixed).
-The user configures max retries, backoff intervals, or a custom function that decides whether to retry.
-
-### Task Lifecycle and Status
-
-Optionally track the status of tasks: “queued,” “in progress,” “completed,” or “failed.”
-Allow users to query the status of a task by ID or retrieve the final result.
-
-### Graceful Shutdown
-
-Provide a method like queue.Shutdown(ctx context.Context) that stops accepting new tasks and waits for in-flight tasks (within a certain timeout) to finish.
-Or a forced shutdown if tasks exceed the timeout.
-
-### Context Support
-
-Each task can receive a context.Context for cancellation or timeout.
-If the user’s app is shutting down (or if the user explicitly cancels a task), the worker should respect that context and stop work gracefully.
-
-# Nice to haves:
-
-### Instrumentation / Metrics
-
-Expose metrics (e.g., Prometheus) about task rates, failures, retries, queue length, worker utilization.
-Developers love having insights into what’s happening under the hood.
-
-### Task Prioritization
-
-Offer separate priority queues or a single queue with priority ordering, so urgent tasks jump ahead of normal ones.
-
-### Web Dashboard / CLI
-
-Provide a small interface to see queued tasks, in-progress tasks, and statuses. Even a simple textual UI or exposed REST endpoints can be a plus.
-
-### Pluggable Storage
-
-For advanced use-cases, tasks could persist to disk, or you could plug in a database to survive restarts.
-This starts to become more like a “real” job scheduler, but it’s a valuable extension if you want your library to handle restarts gracefully.
+## 📊 Architecture
 
 ```
            ┌─────────────┐
- Enqueue ->│ Task Channel │<- Spawned by the Producer
+ Submit -> │ Task Queue  │ -> Worker Pool (N goroutines)
            └─────────────┘
-                 ↓
-          ┌────────────────┐
-          │ Worker 1 (goroutine)  ──┐
-          └────────────────┘         │
-          ┌────────────────┐         │ concurrency-limited
-          │ Worker 2 (goroutine)  ──┤
-          └────────────────┘         │
-                 ...                ...
-          ┌────────────────┐         │
-          │ Worker N (goroutine)  ──┘
-          └────────────────┘
-                 ↓
-   ┌───────────────────────────┐
-   │(Optional) Retry Logic,    │
-   │    Backoff, Scheduling    │
-   └───────────────────────────┘
-                 ↓
-          Task Completion / Result
+                  │
+                  ▼
+         ┌─────────────────┐
+         │ Task Processing │ -> Retry Logic -> Status Tracking
+         └─────────────────┘
 ```
 
-# Potential Design
+### 🔄 Workflow Diagram
+
+```mermaid
+graph TD
+    A[Client Code] -->|Submit| B[TaskQueue]
+    A -->|Schedule| C[Scheduler]
+    A -->|ScheduleAt| C
+    A -->|ScheduleRecurring| C
+    
+    C -->|After Delay| B
+    C -->|At Specific Time| B
+    C -->|Recurring Interval| B
+    
+    B -->|Enqueue Task| D[Task Channel]
+    D -->|Dequeue| E[Worker Pool]
+    
+    subgraph "Worker Pool"
+        E -->|Process| F1[Worker 1]
+        E -->|Process| F2[Worker 2]
+        E -->|Process| F3[Worker N]
+    end
+    
+    F1 -->|Execute| G[Task Execution]
+    F2 -->|Execute| G
+    F3 -->|Execute| G
+    
+    G -->|Success| H[Update Status: Completed]
+    G -->|Failure| I[Retry Logic]
+    
+    I -->|Retry Attempts Remaining| J[Calculate Backoff]
+    J -->|Wait| G
+    
+    I -->|Max Retries Exceeded| K[Update Status: Failed]
+    
+    H --> L[Task Status Map]
+    K --> L
+    
+    A -->|Query Status| L
+    
+    M[Shutdown Signal] -->|Graceful Shutdown| N[Wait for Workers]
+    N -->|Complete In-flight Tasks| O[Terminate]
+```
+
+## 🚀 Quick Start
 
 ```go
-type TaskFunc func(ctx context.Context) error
-
-type TaskQueue interface {
-    // Submit a task to be run as soon as possible.
-    // Returns a unique task ID or a handle for status tracking.
-    Submit(task TaskFunc) (string, error)
-    
-    // Like Submit, but with a scheduled time in the future (delayed task).
-    Schedule(task TaskFunc, runAt time.Time) (string, error)
-
-    // Retrieve info about a task (status, retries, errors, etc.).
-    GetInfo(taskID string) (TaskInfo, error)
-
-    // Stop accepting new tasks and gracefully shut down workers.
-    Shutdown(ctx context.Context) error
-}
-
-type TaskInfo struct {
-    Status   string // "queued", "running", "completed", "failed", etc.
-    Attempts int
-    LastError error
-    // ... maybe more metadata
-}
-
-func NewTaskQueue(opts ...Option) TaskQueue {
-    // Implementation...
-}
-```
-
-## Worker pool concurrency could be set via options:
-``` go
-queue := NewTaskQueue(
-    WithWorkerCount(10),
-    WithRetryOptions(...),
-    WithBufferSize(1000),
-    // etc.
+// Create a task queue with 5 workers
+taskQueue := queue.NewTaskQueue(
+    queue.WithWorkerCount(5),
+    queue.WithRetryPolicy(3, time.Second, time.Minute, queue.RetryFixed, nil),
 )
+
+// Submit a task
+taskID, err := taskQueue.Submit(ctx, func(ctx context.Context) error {
+    // Your task logic here
+    return nil
+})
+
+// Check task status
+info, err := taskQueue.Status(taskID)
+fmt.Printf("Task status: %s\n", info.Status)
+
+// Schedule a task to run after delay
+scheduledID, err := taskQueue.Schedule(ctx, func(ctx context.Context) error {
+    // Delayed task logic
+    return nil
+}, 5*time.Second)
+
+// Graceful shutdown
+err := taskQueue.Shutdown(ctx)
 ```
+
+## 🔧 Configuration Options
+
+| Option | Description |
+|--------|-------------|
+| `WithWorkerCount(n)` | Set number of concurrent workers |
+| `WithQueueSize(n)` | Set maximum queue capacity |
+| `WithRetryPolicy(...)` | Configure retry behavior |
+| `WithBufferSize(n)` | Set channel buffer size |
+
+## 📖 API Reference
+
+### Core Methods
+
+- `Submit(ctx, task)` - Queue a task for immediate execution
+- `Schedule(ctx, task, delay)` - Queue a task to run after a delay
+- `ScheduleAt(ctx, task, time)` - Queue a task to run at a specific time
+- `ScheduleRecurring(ctx, task, interval)` - Queue a recurring task
+- `Status(taskID)` - Get current task status
+- `Shutdown(ctx)` - Gracefully stop the queue
+
+## 📄 License
+
+MIT © [Luke Ward](https://github.com/dukebward)
