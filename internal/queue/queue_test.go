@@ -2,8 +2,12 @@ package queue
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 )
 
 // tests basic task queue creation with default options
@@ -42,7 +46,7 @@ func TestTaskQueue_Submit(t *testing.T) {
 	}
 
 	// check task status
-	status, err := q.Status(id)
+	status, err := q.Status(context.Background(), id)
 	if err != nil {
 		t.Fatalf("Failed to get task status: %v", err)
 	}
@@ -103,4 +107,85 @@ func TestTaskQueue_Shutdown(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error when submitting to shutdown queue, got nil")
 	}
+}
+
+// tests task queue with Redis storage
+func TestTaskQueue_WithRedisStorage(t *testing.T) {
+	// Create a mock Redis server
+	s, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("Failed to create mock Redis server: %v", err)
+	}
+	defer s.Close()
+
+	// Create a Redis client that connects to the mock server
+	client := redis.NewClient(&redis.Options{
+		Addr: s.Addr(),
+	})
+
+	// Create a RedisTaskStorage with the mock client
+	storage := &RedisTaskStorage{
+		client:     client,
+		queueKey:   "test:queue",
+		taskPrefix: "test:task:",
+		taskFuncs:  make(map[string]interface{}),
+		mu:         sync.RWMutex{},
+	}
+
+	// Create a task queue with Redis storage
+	q := NewTaskQueue(
+		WithWorkerCount(1),
+		WithStorage(storage),
+	)
+
+	// Create a channel to signal task completion
+	done := make(chan bool, 1) // Use buffered channel to avoid blocking
+
+	// Create a simple task that signals completion
+	task := func(ctx context.Context) error {
+		t.Log("Task is executing")
+		done <- true
+		t.Log("Task completed")
+		return nil
+	}
+
+	// Submit the task
+	t.Log("Submitting task")
+	id, err := q.Submit(context.Background(), task)
+	if err != nil {
+		t.Fatalf("Failed to submit task: %v", err)
+	}
+	t.Logf("Task submitted with ID: %s", id)
+
+	// Wait for task completion or timeout
+	t.Log("Waiting for task completion")
+	select {
+	case <-done:
+		t.Log("Task completed successfully")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Task execution timed out")
+	}
+
+	// Add a small delay to ensure task status is updated
+	time.Sleep(500 * time.Millisecond)
+
+	// Check task status
+	t.Log("Checking task status")
+	status, err := q.Status(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Failed to get task status: %v", err)
+	}
+	t.Logf("Task status: %s", status.Status)
+
+	if status.Status != "completed" {
+		t.Errorf("Expected status 'completed', got '%s'", status.Status)
+	}
+
+	// Shutdown the queue
+	t.Log("Shutting down queue")
+	err = q.Shutdown(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to shutdown queue: %v", err)
+	}
+	t.Log("Queue shutdown complete")
 }

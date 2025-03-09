@@ -83,7 +83,7 @@ func TestWorker_HandleTaskError(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// check task status - should be failed
-	status, err := q.Status(id)
+	status, err := q.Status(context.Background(), id)
 	if err != nil {
 		t.Fatalf("Failed to get task status: %v", err)
 	}

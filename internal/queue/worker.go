@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // a worker routine
@@ -18,12 +20,58 @@ func (q *TaskQueue) worker(id int) {
 		case <-q.done:
 			// queue has received done
 			return
-		// will block until a task is available
-		case task, ok := <-q.tasks:
-			if !ok {
-				// channel was closed or no tasks
-				return
+		default:
+			var task Task
+			var err error
+
+			if q.storage != nil {
+				// use 1-second timeout for polling
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				task, err = q.storage.DequeueTask(ctx)
+				cancel()
+
+				// check for shutdown signal after each redis operation
+				// this is critical to prevent workers from hanging during shutdown
+				// redis operations can block, so we need to check done channel frequently
+				select {
+				case <-q.done:
+					return
+				default:
+					// continue processing
+				}
+
+				if err != nil {
+					// if timeout or no tasks, continue polling
+					if err == context.DeadlineExceeded || err == redis.Nil {
+						time.Sleep(100 * time.Millisecond)
+
+						// check for shutdown signal after sleep
+						// sleep can delay shutdown if we don't check done channel
+						select {
+						case <-q.done:
+							return
+						default:
+							// continue processing
+						}
+
+						continue
+					}
+					// log other errors
+					continue
+				}
+			} else {
+				// In-memory implementation
+				select {
+				case task, ok := <-q.tasks:
+					if !ok {
+						return
+					}
+					q.processTask(task)
+				case <-q.done:
+					return
+				}
 			}
+
 			q.processTask(task)
 		}
 	}
@@ -112,14 +160,31 @@ func (q *TaskQueue) handleFailedTask(ctx context.Context, task Task, taskFunc Ta
 }
 
 // update the status of a task in the task status map
-func (q *TaskQueue) updateTaskStatus(taskID, status string, attemts int, lastError error) {
+func (q *TaskQueue) updateTaskStatus(taskID, status string, attempts int, lastError error) {
+	// Create task info
+	info := TaskInfo{
+		ID:        taskID,
+		Status:    status,
+		Attempts:  attempts,
+		LastError: lastError,
+	}
+
+	// Use storage if available
+	if q.storage != nil {
+		// Create a background context since we don't have one from the caller
+		ctx := context.Background()
+		err := q.storage.SaveTask(ctx, taskID, info)
+		if err != nil {
+			// Log error but continue - we don't want to fail the task just because
+			// we couldn't update its status
+			fmt.Printf("Error updating task status in storage: %v\n", err)
+		}
+		return
+	}
+
+	// Fall back to in-memory implementation
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	q.taskStatus[taskID] = TaskInfo{
-		ID:        taskID,
-		Status:    status,
-		Attempts:  attemts,
-		LastError: lastError,
-	}
+	q.taskStatus[taskID] = info
 }

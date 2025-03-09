@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ type Task struct {
 type TaskQueue struct {
 	opts       *Options
 	tasks      chan Task
+	storage    TaskStorage
 	taskStatus map[string]TaskInfo
 	done       chan struct{}
 	wg         sync.WaitGroup
@@ -36,6 +38,7 @@ type Options struct {
 	workerCount int
 	queueSize   int
 	bufferSize  int
+	storage     TaskStorage
 	retryPolicy RetryPolicy
 }
 
@@ -82,12 +85,20 @@ func WithRetryPolicy(maxRetries int, baseDelay time.Duration, maxDelay time.Dura
 	}
 }
 
+// withstorage sets the storage
+func WithStorage(storage TaskStorage) Option {
+	return func(o *Options) {
+		o.storage = storage
+	}
+}
+
 // constructor
 func NewTaskQueue(opts ...Option) *TaskQueue {
 	options := &Options{
 		workerCount: 1,
 		queueSize:   100,
 		bufferSize:  100,
+		storage:     nil, // Default to in-memory
 		retryPolicy: RetryPolicy{
 			MaxRetries: 3,
 			BaseDelay:  1 * time.Second,
@@ -111,6 +122,7 @@ func NewTaskQueue(opts ...Option) *TaskQueue {
 		done:       make(chan struct{}),
 		mu:         sync.Mutex{},
 		taskStatus: make(map[string]TaskInfo),
+		storage:    options.storage,
 	}
 
 	// automatically start workers
@@ -127,8 +139,30 @@ func (q *TaskQueue) Submit(ctx context.Context, task TaskFunc) (string, error) {
 		Payload: task,
 	}
 
-	// initialize task status before submitting
-	q.initTaskStatus(taskID, "queued")
+	// Initialize task status
+	info := TaskInfo{
+		ID:       taskID,
+		Status:   "queued",
+		Attempts: 0,
+	}
+
+	// Use storage if available
+	if q.storage != nil {
+		if err := q.storage.SaveTask(ctx, taskID, info); err != nil {
+			return "", err
+		}
+
+		if err := q.storage.EnqueueTask(ctx, newTask); err != nil {
+			return "", err
+		}
+
+		return taskID, nil
+	}
+
+	// Fall back to in-memory implementation
+	q.mu.Lock()
+	q.taskStatus[taskID] = info
+	q.mu.Unlock()
 
 	select {
 	case q.tasks <- newTask:
@@ -142,32 +176,52 @@ func (q *TaskQueue) Shutdown(ctx context.Context) error {
 	// stop current workers of the current task queue
 	close(q.done)
 
-	// wait for all current tasks to finish
+	// wait for all current tasks to finish with a timeout
 	done := make(chan struct{})
 	go func() {
 		q.wg.Wait()
 		close(done)
 	}()
 
+	var shutdownErr error
+
+	// use a timeout of 5 seconds for waiting on workers to finish
+	// this prevents shutdown from hanging indefinitely if workers are stuck
+	// especially important when using redis storage with blocking operations
+	shutdownTimeout := time.After(5 * time.Second)
+
 	select {
 	case <-done:
 		// if shutdown successful
-		return nil
+		// close storage if available
+		if q.storage != nil {
+			if err := q.storage.Close(); err != nil {
+				shutdownErr = fmt.Errorf("error closing storage: %w", err)
+			}
+		}
+	case <-shutdownTimeout:
+		// timeout reached, force shutdown
+		shutdownErr = errors.New("shutdown timed out after 5 seconds")
 	case <-ctx.Done():
 		// have reached context deadline
-		return errors.New("shutdown failure or timeout")
+		shutdownErr = errors.New("shutdown failure or timeout")
 	}
+
+	return shutdownErr
 }
 
-func (q *TaskQueue) Status(id string) (TaskInfo, error) {
-	// the mute will lock the current task queue
+func (q *TaskQueue) Status(ctx context.Context, id string) (TaskInfo, error) {
+	if q.storage != nil {
+		return q.storage.GetTask(ctx, id)
+	}
+
+	// Fall back to in-memory implementation
 	q.mu.Lock()
-	// unlock mutex at end
 	defer q.mu.Unlock()
 
 	taskInfo, ok := q.taskStatus[id]
 	if !ok {
-		return TaskInfo{}, errors.New("task Id was not found")
+		return TaskInfo{}, errors.New("task ID not found")
 	}
 	return taskInfo, nil
 }
@@ -176,7 +230,7 @@ func (q *TaskQueue) Status(id string) (TaskInfo, error) {
 func (q *TaskQueue) initTaskStatus(taskID, status string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	
+
 	q.taskStatus[taskID] = TaskInfo{
 		ID:       taskID,
 		Status:   status,

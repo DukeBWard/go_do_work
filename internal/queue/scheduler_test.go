@@ -64,7 +64,7 @@ func TestSchedule(t *testing.T) {
 	q.mu.Unlock()
 
 	// check task status
-	status, err := q.Status(id)
+	status, err := q.Status(context.Background(), id)
 	if err != nil {
 		t.Fatalf("Failed to get task status: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestScheduleAt(t *testing.T) {
 	q.mu.Unlock()
 
 	// check task status
-	status, err := q.Status(id)
+	status, err := q.Status(context.Background(), id)
 	if err != nil {
 		t.Fatalf("Failed to get task status: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestScheduleRecurring(t *testing.T) {
 	}
 
 	// check task status to use the id variable
-	_, err = q.Status(id)
+	_, err = q.Status(context.Background(), id)
 	if err != nil {
 		t.Logf("Note: Status check after shutdown may fail: %v", err)
 	}
