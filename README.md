@@ -1,6 +1,6 @@
 # 🚀 go_do_work
 
-> A lightweight, in-memory task queue with powerful concurrency controls for Go applications.
+> A lightweight task queue with powerful concurrency controls for Go applications, with optional Redis persistence.
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)](https://golang.org/doc/go1.21)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -18,6 +18,7 @@ go get github.com/dukebward/go_do_work
 - **🔁 Smart Retries** - Automatic retries with customizable backoff strategies
 - **🔍 Task Tracking** - Monitor task status, attempts, and errors
 - **🛑 Graceful Shutdown** - Clean termination with in-flight task completion
+- **💾 Storage Options** - In-memory (default) or Redis-backed persistence (experimental)
 
 ## 📊 Architecture
 
@@ -29,6 +30,11 @@ go get github.com/dukebward/go_do_work
                   ▼
          ┌─────────────────┐
          │ Task Processing │ -> Retry Logic -> Status Tracking
+         └─────────────────┘
+                  │
+                  ▼
+         ┌─────────────────┐
+         │ Storage Backend │ -> In-Memory or Redis
          └─────────────────┘
 ```
 
@@ -66,13 +72,23 @@ graph TD
     
     I -->|Max Retries Exceeded| K[Update Status: Failed]
     
-    H --> L[Task Status Map]
-    K --> L
+    subgraph "Storage Options"
+        L1[In-Memory Map]
+        L2[Redis Storage]
+    end
     
-    A -->|Query Status| L
+    H --> L1
+    H --> L2
+    K --> L1
+    K --> L2
     
-    M[Shutdown Signal] -->|Graceful Shutdown| N[Wait for Workers]
-    N -->|Complete In-flight Tasks| O[Terminate]
+    L1 --> M[Task Status]
+    L2 --> M
+    
+    A -->|Query Status| M
+    
+    N[Shutdown Signal] -->|Graceful Shutdown| O[Wait for Workers]
+    O -->|Complete In-flight Tasks| P[Terminate]
 ```
 
 ## 🚀 Quick Start
@@ -91,7 +107,7 @@ taskID, err := taskQueue.Submit(ctx, func(ctx context.Context) error {
 })
 
 // Check task status
-info, err := taskQueue.Status(taskID)
+info, err := taskQueue.Status(ctx, taskID)
 fmt.Printf("Task status: %s\n", info.Status)
 
 // Schedule a task to run after delay
@@ -112,6 +128,7 @@ err := taskQueue.Shutdown(ctx)
 | `WithQueueSize(n)` | Set maximum queue capacity | 100 |
 | `WithBufferSize(n)` | Set channel buffer size | 100 |
 | `WithRetryPolicy(maxRetries, baseDelay, maxDelay, strategy, shouldRetry)` | Configure retry behavior | See below |
+| `WithStorage(storage)` | Set custom storage backend | In-memory |
 
 ### Retry Policy Configuration
 
@@ -133,6 +150,37 @@ The retry policy can be customized using the `WithRetryPolicy` option with the f
 | `RetryExponential` | Increases delay exponentially between retry attempts |
 | `RetryLinear` | Increases delay linearly between retry attempts |
 | `RetryImmediate` | Retries immediately without any delay |
+
+### Storage Options
+
+By default, the task queue uses in-memory storage. For persistence and distributed scenarios, you can use the experimental Redis storage backend:
+
+```go
+// Create Redis storage
+redisStorage, err := queue.NewRedisTaskStorage(
+    "localhost:6379", // Redis address
+    "",               // Password (empty for none)
+    0,                // Database number
+)
+if err != nil {
+    log.Fatalf("Failed to create Redis storage: %v", err)
+}
+
+// Create task queue with Redis storage
+taskQueue := queue.NewTaskQueue(
+    queue.WithWorkerCount(5),
+    queue.WithStorage(redisStorage),
+)
+```
+
+#### Redis Storage Benefits
+
+- **Persistence**: Tasks survive application restarts
+- **Distribution**: Multiple application instances can share the same queue
+- **Scalability**: Easily scale workers across multiple processes or machines
+- **Monitoring**: Inspect queue state using Redis tools
+
+> **Note**: Redis storage is currently experimental and the API may change in future releases.
 
 #### Example Configuration
 
@@ -160,6 +208,9 @@ taskQueue := queue.NewTaskQueue(
                    errors.Is(err, context.DeadlineExceeded)
         },
     ),
+    
+    // Optional: Use Redis storage
+    queue.WithStorage(redisStorage),
 )
 ```
 
@@ -171,7 +222,7 @@ taskQueue := queue.NewTaskQueue(
 - `Schedule(ctx, task, delay)` - Queue a task to run after a delay
 - `ScheduleAt(ctx, task, time)` - Queue a task to run at a specific time
 - `ScheduleRecurring(ctx, task, interval)` - Queue a recurring task
-- `Status(taskID)` - Get current task status
+- `Status(ctx, taskID)` - Get current task status
 - `Shutdown(ctx)` - Gracefully stop the queue
 
 ## 📄 License
