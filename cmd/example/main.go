@@ -50,7 +50,7 @@ func main() {
 
 	// check status after a short delay
 	time.Sleep(2 * time.Second)
-	info, err := taskQueue.Status(taskID)
+	info, err := taskQueue.Status(ctx, taskID)
 	if err != nil {
 		log.Printf("Failed to get task status: %v", err)
 	} else {
@@ -110,7 +110,7 @@ func main() {
 	// gracefully shutdown with a timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
-	
+
 	if err := taskQueue.Shutdown(shutdownCtx); err != nil {
 		log.Printf("Error during shutdown: %v", err)
 	} else {
